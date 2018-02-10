@@ -86,6 +86,14 @@ function Fish.draw_all(player_pos)
   ps:add(f.x,f.y,f)
  end
  local dir,dist,move,pos,penguin
+ --[[ Behavior of fish
+   Avoid predators - know where the nearest predators are and avoid them (shard and penguin)
+   Avoid nearest fish
+   Stay in screen - when moving to the edge push the fish back
+   Don't go over surface - prevent fish moving over the water surface
+   Move to the flock center
+   Synchronize speed with the flock
+ ]]
  for f in pairs(Fish.list) do
   pos=Vect2(f.x,f.y)
   dir=ps:find_nearest(f.x, f.y) - pos
@@ -121,16 +129,33 @@ end
 
 Shark=Class:extend()
 function Shark:new()
- self.x=250
+ self:generate()
+end
+
+function Shark:generate()
  self.y=math.random(30, 120)
+ if math.random(0,1) == 1 then
+  self.turn=LEFT
+  self.x=250
+ else
+  self.turn=RIGHT
+  self.x=-30
+ end
 end
 
 function Shark:draw()
- spr(SPR.SHARK,self.x,self.y,1,1,0,0,4,2)
- self.x = self.x - 1
- if self.x < -100 then
-  self.x=250
-  self.y=math.random(30, 120)
+ if self.turn==LEFT then
+     spr(SPR.SHARK,self.x,self.y,1,1,0,0,4,2)
+     self.x = self.x - 1
+     if self.x < -100 then
+       self:generate()
+     end
+ else
+     spr(SPR.SHARK,self.x,self.y,1,1,1,0,4,2)
+     self.x = self.x + 1
+     if self.x > 340 then
+       self:generate()
+     end
  end
 end
 
