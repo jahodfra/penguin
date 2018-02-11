@@ -30,6 +30,16 @@ function PointSet:find_near(v, dist)
  end
  return results
 end
+function PointSet:find_nearest(v, dist)
+ local results={}
+ local cur_dist=dist
+ local cur_nearest
+ for bv,b in pairs(self._points)do
+  local d=hypot2(v.x,v.y,bv.x,bv.y)
+  if 0.1<d and d<cur_dist then cur_nearest=b;cur_dist=d end
+ end
+ return cur_nearest, cur_dist
+end
 Vect2=Class:extend()
 function Vect2:new(x,y)self.x=x self.y=y end
 function Vect2:__len()return math.sqrt(self.x^2+self.y^2) end
@@ -46,7 +56,13 @@ function Vect2:norm()
  end
 end
 
+REPEL_FISH_DIST=15
+REPEL_SHARK_DIST=40
+REPEL_PENGUIN_DIST=20
+
+
 Player=Class:extend()
+Player.repel_distance=REPEL_PENGUIN_DIST
 
 function Player:new(x,y)
  self.x=x
@@ -70,7 +86,7 @@ function Player:control(up,down,left,right)
  end
 
  if self.turn==LEFT then self.x=self.x-self.speed/2 else self.x=self.x+self.speed/2 end
- if up and self.y > 10 then self.y=self.y-.5 end
+ if up and self.y > SURFACE then self.y=self.y-.5 end
  if down and self.y < 130 then self.y=self.y+.5 end
  if self.speed>1 and (t%20)==0 then Bubble(self.x,self.y) end
 end
@@ -84,6 +100,7 @@ end
 
 Fish=Class:extend()
 Fish.list={}
+Fish.prev_move=Vect2(.0,.0)
 
 function Fish.draw_all()
  local ps=PointSet()
@@ -97,7 +114,8 @@ function Fish.draw_all()
  Don't go over surface - prevent fish moving over the water surface
  Synchronize speed with the flock
  ]]
- local fish_mass=Vect2(0,0)
+ local fish_mass=Vect2(.0,.0)
+ local fish_move=Vect2(.0,.0)
  local count=0
  for f in pairs(Fish.list) do
   fish_mass=fish_mass+Vect2(f.x,f.y)
@@ -107,44 +125,58 @@ function Fish.draw_all()
   fish_mass=fish_mass*(1.0/count)
  end
  for f in pairs(Fish.list) do
-  local fish_vector, predator_vector
-  fish_repel=Vect2(0,0)
-  fish_pos=Vect2(f.x,f.y)
-  for other_fish, dist in pairs(ps:find_near(fish_pos, 10)) do
-   fish_repel=fish_repel + (Vect2(other_fish.x,other_fish.y) - fish_pos)
-  end
-  fish_attract=fish_mass-fish_pos
-  predator_vector=Vect2(.0,.0)
-  for _,predator in ipairs({player, shark}) do
-   local pred_v=Vect2(predator.x,predator.y)-fish_pos
-   if #pred_v < 20 then
-    predator_vector=predator_vector+pred_v
-   end
-  end
-  move=predator_vector:norm()*-7 + fish_attract:norm()*1 + fish_repel:norm()*-4
-  move=move:norm()
-  f.x=f.x+move.x
-  f.y=f.y+move.y
+  fish_move = fish_move + f:move(ps,fish_mass)
  end
+ Fish.prev_move = fish_move:norm()
 end
 
 function Fish:new(x,y)
  self.x=x
  self.y=y
+ self.turn = RIGHT
  set_add(Fish.list,self)
 end
 
+function Fish:move(ps,fish_mass)
+ local fish_vector, predator_vector
+ fish_repel=Vect2(0,0)
+ fish_pos=Vect2(self.x,self.y)
+ local nearest = ps:find_nearest(fish_pos, REPEL_FISH_DIST)
+ if nearest then
+  fish_repel=fish_repel + (Vect2(nearest.x,nearest.y) - fish_pos)
+ end
+ fish_attract=fish_mass-fish_pos
+ predator_vector=Vect2(.0,.0)
+ local threatened = false
+ for _,predator in ipairs({player, shark}) do
+  local pred_v=Vect2(predator.x,predator.y)-fish_pos
+  if #pred_v < predator.repel_distance then
+   predator_vector=predator_vector+pred_v
+   threatened = true
+  end
+ end
+ local center = (Vect2(120, 70) - fish_pos):norm()
+ move=predator_vector:norm()*-4 + fish_attract:norm() + fish_repel:norm()*-2 + Fish.prev_move + center*0.5
+ move=move:norm() * (threatened and 1.0 or 0.3)
+ self.x=self.x+move.x
+ self.y=self.y+move.y
+ if self.y < SURFACE then self.y = SURFACE end
+ if move.x < 0 then self.turn=LEFT else self.turn=RIGHT end
+ return move
+end
+
 function Fish:draw()
- spr(SPR.FISH,self.x,self.y,1)
+ spr(SPR.FISH,self.x,self.y,1,1,self.turn==RIGHT and 0 or 1)
 end
 
 Shark=Class:extend()
+Shark.repel_distance=REPEL_SHARK_DIST
 function Shark:new()
  self:generate()
 end
 
 function Shark:generate()
- self.y=math.random(30, 120)
+ self.y=math.random(SURFACE, 136-16)
  if math.random(0,1) == 1 then
   self.turn=LEFT
   self.x=250
@@ -205,6 +237,8 @@ SPR={
  SHARK=80
 }
 
+SURFACE = 20
+
 function init()
  for i=1,20 do
    Fish(math.random(240),math.random(110)+16)
@@ -221,17 +255,17 @@ function TIC()
  end
  player:draw()
  shark:draw()
- print("CATCH THE FISH!",84,64)
+ --print("CATCH THE FISH!",84,64)
  t=t+1
 end
 
 function draw_water()
  local i,shift
  cls(8)
- rect(0,11,240,136-11,1)
+ rect(0,SURFACE,240,136-SURFACE,1)
  for i=0,8 do
   local shift=t//2 % 32
-  spr(SPR.WATER,-32+shift+i*32,3,8,1,0,0,4,1)
+  spr(SPR.WATER,-32+shift+i*32,SURFACE-8,8,1,0,0,4,1)
  end
 end
 
