@@ -17,19 +17,18 @@ function Class:implement(...)for a,b in pairs({...})do for c,d in pairs(b)do if 
 function Class:is(a)local b=getmetatable(self)while b do if b==a then return true end;b=getmetatable(b)end;return false end
 -- end --
 PointSet=Class:extend()
-function PointSet:new(row_size)self.row_size=row_size or 1000;self._points={}end
-function PointSet:add(x,y,object)
- self._points[Vect2(x,y)]=object
+function PointSet:new()self._points={}end
+function PointSet:add(v,object)
+ self._points[v]=object
 end
 function hypot2(a,b,c,d)return math.sqrt((a-c)^2+(b-d)^2)end
-function PointSet:find_nearest(x,y)
- local res,d
- local md=math.huge
- for bi,b in pairs(self._points)do
-  d=hypot2(x,y,bi.x,bi.y)
-  if 1<d and d<md then md=d res=bi end
+function PointSet:find_near(v, dist)
+ local results={}
+ for bv,b in pairs(self._points)do
+  local d=hypot2(v.x,v.y,bv.x,bv.y)
+  if 0.1<d and d<dist then results[b]=d end
  end
- return res, self._points[res]
+ return results
 end
 Vect2=Class:extend()
 function Vect2:new(x,y)self.x=x self.y=y end
@@ -39,6 +38,13 @@ function Vect2:__add(v2)return Vect2(self.x+v2.x,self.y+v2.y)end
 function Vect2:__mul(m)return Vect2(self.x*m,self.y*m)end
 function Vect2:__eq(m)return self.x==m.x and self.y==m.y end
 function Vect2:__tostring()return"("..self.x..", "..self.y..")"end
+function Vect2:norm()
+ if self.x~=.0 or self.y~=.0 then
+  return self*(1.0/#self)
+ else
+  return Vect2(.0,.0)
+ end
+end
 
 Player=Class:extend()
 
@@ -79,41 +85,46 @@ end
 Fish=Class:extend()
 Fish.list={}
 
-function Fish.draw_all(player_pos)
- local ps=PointSet(1000)
+function Fish.draw_all()
+ local ps=PointSet()
  for f in pairs(Fish.list) do
   f:draw()
-  ps:add(f.x,f.y,f)
+  ps:add(Vect2(f.x,f.y), f)
  end
  local dir,dist,move,pos,penguin
  --[[ Behavior of fish
-   Avoid predators - know where the nearest predators are and avoid them (shard and penguin)
-   Avoid nearest fish
-   Stay in screen - when moving to the edge push the fish back
-   Don't go over surface - prevent fish moving over the water surface
-   Move to the flock center
-   Synchronize speed with the flock
+ Stay in screen - when moving to the edge push the fish back
+ Don't go over surface - prevent fish moving over the water surface
+ Synchronize speed with the flock
  ]]
+ local fish_mass=Vect2(0,0)
+ local count=0
  for f in pairs(Fish.list) do
-  pos=Vect2(f.x,f.y)
-  dir=ps:find_nearest(f.x, f.y) - pos
-  penguin=player_pos - pos
-  if #penguin < 30 then
-   move=penguin*(0.5 / #penguin)
-   f.x=f.x-move.x
-   f.y=f.y-move.y
-  else
-   dist=#dir
-   if dist >= 20 then
-    move=dir*(0.2 / dist)
-    f.x=f.x+move.x
-    f.y=f.y+move.y
-   elseif dist < 10 then
-    move=dir*(-0.2 / dist)
-    f.x=f.x+move.x
-    f.y=f.y+move.y
+  fish_mass=fish_mass+Vect2(f.x,f.y)
+  count=count+1
+ end
+ if count>0 then
+  fish_mass=fish_mass*(1.0/count)
+ end
+ for f in pairs(Fish.list) do
+  local fish_vector, predator_vector
+  fish_repel=Vect2(0,0)
+  fish_pos=Vect2(f.x,f.y)
+  for other_fish, dist in pairs(ps:find_near(fish_pos, 10)) do
+   fish_repel=fish_repel + (Vect2(other_fish.x,other_fish.y) - fish_pos)
+  end
+  fish_attract=fish_mass-fish_pos
+  predator_vector=Vect2(.0,.0)
+  for _,predator in ipairs({player, shark}) do
+   local pred_v=Vect2(predator.x,predator.y)-fish_pos
+   if #pred_v < 20 then
+    predator_vector=predator_vector+pred_v
    end
   end
+  move=predator_vector:norm()*-7 + fish_attract:norm()*1 + fish_repel:norm()*-4
+  move=move:norm()
+  f.x=f.x+move.x
+  f.y=f.y+move.y
  end
 end
 
@@ -204,7 +215,7 @@ end
 function TIC()
  player:control(btn(0),btn(1),btn(2),btn(3))
  draw_water()
- Fish.draw_all(Vect2(player.x, player.y))
+ Fish.draw_all()
  for b in pairs(Bubble.list) do
   b:draw()
  end
