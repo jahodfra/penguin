@@ -68,34 +68,73 @@ function Player:new(x,y)
  self.x=x
  self.y=y
  self.turn=RIGHT
- self.speed=1
+ self.accel=0
+ self.speed=0
+ self.waiting=0
+ self.oxygen=1.0
+ self.angle=0
+end
+
+function Player:make_turn(new_direction)
+ if self.turn == new_direction then
+  if self.oxygen > 0.0 then
+   self.accel=0.03
+  else
+   self.accel=0.003
+  end
+  self.oxygen=math.max(self.oxygen-0.001, 0.0)
+ else
+  self.turn = new_direction
+  self.speed = self.speed * 0.7
+  self.waiting=6
+ end
 end
 
 function Player:control(up,down,left,right)
- self.speed=1
+ if self.y <= SURFACE+2 then self.oxygen=math.min(self.oxygen+0.01, 1.0) end
+ if self.waiting > 0 then
+  self.waiting = self.waiting - 1
+  return
+ end
+ self.accel=-0.01
  if self.x < -16 then
   self.turn=RIGHT
  elseif left then
-  self.turn=LEFT;self.speed=2
+  self:make_turn(LEFT)
  end
 
  if self.x > 256 then
   self.turn=LEFT
  elseif right then
-  self.turn=RIGHT;self.speed=2
+  self:make_turn(RIGHT)
  end
 
- if self.turn==LEFT then self.x=self.x-self.speed/2 else self.x=self.x+self.speed/2 end
- if up and self.y > SURFACE then self.y=self.y-.5 end
- if down and self.y < 130 then self.y=self.y+.5 end
- if self.speed>1 and (t%20)==0 then Bubble(self.x,self.y) end
+ self.speed = math.min(math.max(self.speed + self.accel,0.0), 1.3)
+ self.angle=0
+ if self.turn==LEFT then self.x=self.x-self.speed else self.x=self.x+self.speed end
+ if up and self.y > SURFACE then self.y=self.y-.5;self.angle=-1 end
+ if down and self.y < 130 then self.y=self.y+.5;self.angle=1 end
+ if self.accel>=0.03 and (t%20)==0 then Bubble(self.x,self.y) end
 end
 
 function Player:draw()
- local phase,flip
- phase=t/6*self.speed%3
+ local phase,flip,img
+ local rotate=0
  if self.turn==LEFT then flip=1 else flip=0 end
- spr(SPR.PENGUIN+phase,self.x,self.y,0,1,flip)
+ img=SPR.PENGUIN
+ if self.angle==1 then
+   rotate=1
+   img=img+16
+ elseif self.angle==-1 then
+   img=img+16
+ end
+ if self.waiting > 0 then
+   img=img+3
+ else
+  phase=t/6*math.max(self.accel,0.0)*20%3
+  img=img+phase
+ end
+ spr(img,self.x-4,self.y-4,0,1,flip,rotate)
 end
 
 Fish=Class:extend()
@@ -139,14 +178,14 @@ end
 
 function Fish:move(ps,fish_mass)
  local fish_vector, predator_vector
- fish_repel=Vect2(0,0)
- fish_pos=Vect2(self.x,self.y)
+ local fish_repel=Vect2(0,0)
+ local fish_pos=Vect2(self.x,self.y)
  local nearest = ps:find_nearest(fish_pos, REPEL_FISH_DIST)
  if nearest then
   fish_repel=fish_repel + (Vect2(nearest.x,nearest.y) - fish_pos)
  end
- fish_attract=fish_mass-fish_pos
- predator_vector=Vect2(.0,.0)
+ local fish_attract=fish_mass-fish_pos
+ local predator_vector=Vect2(.0,.0)
  local threatened = false
  for _,predator in ipairs({player, shark}) do
   local pred_v=Vect2(predator.x,predator.y)-fish_pos
@@ -156,21 +195,22 @@ function Fish:move(ps,fish_mass)
   end
  end
  local center = (Vect2(120, 70) - fish_pos):norm()
- move=predator_vector:norm()*-4 + fish_attract:norm() + fish_repel:norm()*-2 + Fish.prev_move + center*0.5
+ local move=predator_vector:norm()*-4 + fish_attract:norm() + fish_repel:norm()*-2 + Fish.prev_move + center*0.5
  move=move:norm() * (threatened and 1.0 or 0.3)
  self.x=self.x+move.x
  self.y=self.y+move.y
- if self.y < SURFACE then self.y = SURFACE end
+ if self.y < SURFACE+4 then self.y = SURFACE+4 end
  if move.x < 0 then self.turn=LEFT else self.turn=RIGHT end
  return move
 end
 
 function Fish:draw()
- spr(SPR.FISH,self.x,self.y,1,1,self.turn==RIGHT and 0 or 1)
+ spr(SPR.FISH,self.x-4,self.y-4,1,1,self.turn==RIGHT and 0 or 1)
 end
 
 Shark=Class:extend()
 Shark.repel_distance=REPEL_SHARK_DIST
+Shark.speed = 0.5
 function Shark:new()
  self:generate()
 end
@@ -188,14 +228,14 @@ end
 
 function Shark:draw()
  if self.turn==LEFT then
-     spr(SPR.SHARK,self.x,self.y,1,1,0,0,4,2)
-     self.x = self.x - 1
+     spr(SPR.SHARK,self.x-16,self.y-8,1,1,0,0,4,2)
+     self.x = self.x - self.speed
      if self.x < -100 then
        self:generate()
      end
  else
-     spr(SPR.SHARK,self.x,self.y,1,1,1,0,4,2)
-     self.x = self.x + 1
+     spr(SPR.SHARK,self.x-16,self.y-8,1,1,1,0,4,2)
+     self.x = self.x + self.speed
      if self.x > 340 then
        self:generate()
      end
@@ -214,10 +254,10 @@ end
 
 function Bubble:draw()
  local phase = (t/3+self.index)%4
- spr(SPR.BUBBLE+phase,self.x,self.y,0)
+ spr(SPR.BUBBLE+phase,self.x-4,self.y-4,0)
  self.y=self.y-math.random(0,5)/5
  self.x=self.x+math.random(-3, 3)/3
- if self.y < 5 then
+ if self.y < SURFACE then
   set_remove(Bubble.list, self)
  end
 end
@@ -232,7 +272,8 @@ RIGHT=0
 SPR={
  WATER=32,
  FISH=64,
- PENGUIN=16,
+ PENGUIN=112,
+ PENGUIN_UP=112,
  BUBBLE=48,
  SHARK=80
 }
@@ -240,7 +281,7 @@ SPR={
 SURFACE = 20
 
 function init()
- for i=1,20 do
+ for i=1,40 do
    Fish(math.random(240),math.random(110)+16)
  end
  shark=Shark()
@@ -255,6 +296,11 @@ function TIC()
  end
  player:draw()
  shark:draw()
+
+ local oxygen_color=13
+ if player.oxygen < 0.2 then oxygen_color=6 end
+ rect(20,5,player.oxygen*28+2,5, oxygen_color)
+ print("O2", 5, 5)
  --print("CATCH THE FISH!",84,64)
  t=t+1
 end
@@ -263,33 +309,36 @@ function draw_water()
  local i,shift
  cls(8)
  rect(0,SURFACE,240,136-SURFACE,1)
- for i=0,8 do
+ --[[for i=0,8 do
   local shift=t//2 % 32
   spr(SPR.WATER,-32+shift+i*32,SURFACE-8,8,1,0,0,4,1)
- end
+ end]]
 end
 
 init()
+
+--report global variables
+setmetatable(_G, {__newindex=function(a,b,c) trace(string.format("Trying to crate global variable %s", b)) exit() end})
 -- <TILES>
 -- 000:8888888888888888888888888888888888888881888881118881111111111111
 -- 001:8888811188811111811111111111111111111111111111111111111111111111
 -- 002:1118888811111888111111181111111111111111111111111111111111111111
 -- 003:8888888888888888888888888888888818888888111888881111188811111111
 -- 004:fffffeee2222ffee88880fee22280feefff80ffffff80f0f0ff80f0f0ff80f0f
--- 016:0000000000000000033333303333333603aa33a0000033000003300000000000
--- 017:0000000000000000033333303333333603a33aa0000330000033000000000000
--- 018:0000000000000000033333303333333603aa33a0000033000000030000000000
--- 019:f8fffffff8888888f888f888f8888ffff8888888f2222222ff000fffefffffef
+-- 016:000000000000000003333330333333360eaa33a0000033000003300000000000
+-- 017:000000000000000003333330333333360ea33aa0000330000033000000000000
+-- 018:000000000000000003333330333333360eaa33a0000033000000030000000000
+-- 019:000000000000000000033000003333000333333030eaae033000000300000000
 -- 020:fff800ff88880ffef8880fee88880fee88880fee2222ffee000ffeeeffffeeee
--- 032:8888888888888888888888888888888888888881888811111111111111111111
+-- 032:8888888888888888888888888888888888888111811111111111111111111111
 -- 033:8888888888888888888811118111111111111111111111111111111111111111
--- 034:8888888888888888111188881111111811111111111111111111111111111111
--- 035:8888888888888888888888888888888818888888111188881111111111111111
+-- 034:888888888888888811111f88111111f811111111111111111111111111111111
+-- 035:8888888888888888888888888888888818888888111888881111111111111111
 -- 048:0000000000000000000ff00000f00f0000f00f00000ff0000000000000000000
 -- 049:000000000000000000000000000ff00000f00f00000fff000000000000000000
 -- 050:000000000000000000000000000f000000f0f000000f00000000000000000000
 -- 051:000000000000000000fff00000f00f00000ff000000000000000000000000000
--- 064:1111111111101111110000111100000111000011111011111111111111111111
+-- 064:1111111111111111110001111100001111000111111111111111111111111111
 -- 080:1111111111111111111111111111111111111111111111111111000030000000
 -- 081:1111111111111110111111001111100011110000111000000000000000000000
 -- 082:1111111111111111011111110111111101111111011111110000011100000000
@@ -298,6 +347,18 @@ init()
 -- 097:0000000033333330300003333000003311000011111000011111100011111111
 -- 098:0000000000000000333333333330110111101111111111111111111111111111
 -- 099:0000011100000111330011111330011111130011111133111111111111111111
+-- 112:000000000000000003333330333333360eaa33a0000033000003300000000000
+-- 113:000000000000000003333330333333360ea33aa0000330000033000000000000
+-- 114:000000000000000003333330333333360eaa33a0000033000000030000000000
+-- 115:000000000000000000033000003333000333333030eaae033000000300000000
+-- 128:000003300003333600333330033333a033aa33003e0033000000030000000000
+-- 129:00000330000333360033333003333aa033a330003e0330000003000000000000
+-- 130:000003300003333600333330033333a033aa33303e0003300000000000000000
+-- 131:00033000003333000333333033333333003333000033330000e00e0000000000
+-- 144:8888888800000000000000000000000000000000000000000000000000000000
+-- 145:8888888800000000000000000000000000000000000000000000000000000000
+-- 146:8888888800000000000000000000000000000000000000000000000000000000
+-- 147:8888888800000000000000000000000000000000000000000000000000000000
 -- </TILES>
 
 -- <WAVES>
@@ -311,5 +372,6 @@ init()
 -- </SFX>
 
 -- <PALETTE>
--- 000:140c1c20285530346d4e4a4e854c30346524d04648757161597dced27d2c8595a16daa2cd2aa996dc2cadad45edeeed6
+-- 000:140c1c20285530346d4e4a4e854c30346524894648757161597dced27d2c8595a16daa2cd2aa996dc2caaeae5edeeed6
 -- </PALETTE>
+
